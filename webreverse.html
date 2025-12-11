@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Android Video Reverser (Original Quality)</title>
+    
+    <style>
+        :root {
+            --primary: #6200ea;
+            --bg: #121212;
+            --card: #1e1e1e;
+            --text: #ffffff;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        h2 { margin-bottom: 20px; text-align: center; }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            background: var(--card);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        .upload-btn-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            width: 100%;
+            margin-bottom: 15px;
+        }
+
+        .btn {
+            border: 2px solid var(--primary);
+            color: white;
+            background-color: var(--primary);
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            width: 100%;
+            cursor: pointer;
+            text-align: center;
+            box-sizing: border-box;
+        }
+
+        .btn:disabled {
+            background-color: #555;
+            border-color: #555;
+            cursor: not-allowed;
+        }
+
+        .upload-btn-wrapper input[type=file] {
+            font-size: 100px;
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            cursor: pointer;
+            width: 100%;
+            height: 100%;
+        }
+
+        video {
+            width: 100%;
+            border-radius: 8px;
+            margin-top: 10px;
+            background: #000;
+            max-height: 400px;
+        }
+
+        .log-container {
+            margin-top: 15px;
+            background: #000;
+            color: #0f0;
+            font-family: monospace;
+            padding: 10px;
+            border-radius: 4px;
+            height: 100px;
+            overflow-y: scroll;
+            font-size: 12px;
+            display: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            background-color: #333;
+            border-radius: 4px;
+            margin-top: 10px;
+            height: 10px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: #00e676;
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .info-badge {
+            background: #2c2c2c;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            margin-bottom: 15px;
+            border-left: 4px solid #ff9800;
+            color: #ddd;
+        }
+    </style>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.7/dist/umd/ffmpeg.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.4/dist/umd/ffmpeg-core.js"></script>
+</head>
+<body>
+
+    <div class="container">
+        <h2>↺ Reverse Video Android</h2>
+        
+        <div class="info-badge">
+            <strong>Tips:</strong> Gunakan video pendek (10-30 detik) agar browser HP tidak crash. Resolusi asli akan dipertahankan.
+        </div>
+
+        <div class="upload-btn-wrapper">
+            <button class="btn">📂 Pilih Video</button>
+            <input type="file" id="uploader" accept="video/*" />
+        </div>
+
+        <video id="player" controls style="display:none;"></video>
+        <p id="file-info" style="font-size: 0.9rem; color: #aaa; text-align: center; margin-top: 5px;"></p>
+
+        <button id="convert-btn" class="btn" style="margin-top: 15px; display:none; background-color: #ff4081; border-color: #ff4081;">
+            ⚡ Reverse & Export (Asli)
+        </button>
+
+        <div class="progress-bar" id="progress-bar">
+            <div class="progress-fill" id="progress-fill"></div>
+        </div>
+
+        <div class="log-container" id="logger"></div>
+
+        <div id="output-section" style="display:none; margin-top: 20px; text-align: center;">
+            <h3>Hasil Reverse:</h3>
+            <video id="output-player" controls></video>
+            <a id="download-link" class="btn" style="margin-top: 10px; background-color: #00e676; border-color: #00e676; text-decoration: none; display: inline-block; color: #000;">
+                ⬇️ Download Video
+            </a>
+        </div>
+    </div>
+
+    <script>
+        const { FFmpeg } = FFmpegWASM;
+        const { fetchFile } = FFmpegUtil;
+        let ffmpeg = null;
+        let videoFile = null;
+
+        const uploader = document.getElementById('uploader');
+        const player = document.getElementById('player');
+        const convertBtn = document.getElementById('convert-btn');
+        const logger = document.getElementById('logger');
+        const progressBar = document.getElementById('progress-bar');
+        const progressFill = document.getElementById('progress-fill');
+        const outputSection = document.getElementById('output-section');
+        const outputPlayer = document.getElementById('output-player');
+        const downloadLink = document.getElementById('download-link');
+        const fileInfo = document.getElementById('file-info');
+
+        // Fungsi Log
+        const log = (message) => {
+            logger.style.display = 'block';
+            logger.innerHTML += `> ${message}<br>`;
+            logger.scrollTop = logger.scrollHeight;
+        };
+
+        // 1. Inisialisasi FFmpeg
+        const loadFFmpeg = async () => {
+            if (ffmpeg === null) {
+                ffmpeg = new FFmpeg();
+                ffmpeg.on('log', ({ message }) => {
+                    // Filter log untuk tampilan yang lebih bersih
+                    if(message.includes('frame=')) log(message);
+                });
+                
+                ffmpeg.on('progress', ({ progress }) => {
+                    progressFill.style.width = `${progress * 100}%`;
+                });
+
+                try {
+                    // Menggunakan versi single-thread atau multi-thread tergantung support browser
+                    // Kita arahkan ke CDN core URL secara eksplisit
+                    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.4/dist/umd';
+                    await ffmpeg.load({
+                        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+                        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+                    });
+                    log("Mesin FFmpeg Siap!");
+                } catch (e) {
+                    log("Error Load FFmpeg: " + e.message);
+                    alert("Gagal memuat sistem. Pastikan Anda menggunakan HTTPS atau Localhost, bukan file://");
+                }
+            }
+        };
+
+        // Helper untuk load script dari CDN agar bisa berjalan di browser
+        const toBlobURL = async (url, mimeType) => {
+            const buf = await (await fetch(url)).arrayBuffer();
+            return URL.createObjectURL(new Blob([buf], { type: mimeType }));
+        };
+
+        // 2. Handle Upload File
+        uploader.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            videoFile = file;
+            player.src = URL.createObjectURL(file);
+            player.style.display = 'block';
+            convertBtn.style.display = 'block';
+            outputSection.style.display = 'none';
+            
+            fileInfo.innerText = `File: ${file.name} | Size: ${(file.size/1024/1024).toFixed(2)} MB`;
+            
+            // Inisialisasi FFmpeg saat user upload file pertama kali
+            await loadFFmpeg();
+        });
+
+        // 3. Proses Reverse Video
+        convertBtn.addEventListener('click', async () => {
+            if (!ffmpeg || !videoFile) return;
+
+            convertBtn.disabled = true;
+            convertBtn.innerText = "Sedang Memproses... (Tunggu)";
+            progressBar.style.display = 'block';
+            progressFill.style.width = '0%';
+            log("Mulai menulis file ke memori...");
+
+            try {
+                // Tulis file ke virtual file system FFmpeg
+                const inputName = 'input.mp4';
+                const outputName = 'output.mp4';
+                
+                await ffmpeg.writeFile(inputName, await fetchFile(videoFile));
+
+                log("Menjalankan perintah Reverse...");
+                
+                // --- KUNCI FITUR ---
+                // 1. -vf reverse : Membalik video
+                // 2. -af areverse : Membalik audio (opsional, hapus jika ingin mute)
+                // 3. Kita tidak mengubah resolusi (-s), jadi otomatis ikut input (Ukuran Asli)
+                // 4. -preset ultrafast : Agar lebih cepat di HP
+                
+                await ffmpeg.exec([
+                    '-i', inputName, 
+                    '-vf', 'reverse', 
+                    '-af', 'areverse', 
+                    '-c:v', 'libx264', 
+                    '-preset', 'ultrafast', 
+                    '-crf', '28', // Kompresi sedikit agar memori HP kuat
+                    outputName
+                ]);
+
+                log("Proses selesai! Membaca file...");
+
+                // Baca hasil
+                const data = await ffmpeg.readFile(outputName);
+                
+                // Buat link download
+                const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+                
+                outputPlayer.src = url;
+                downloadLink.href = url;
+                downloadLink.download = `REVERSED_${videoFile.name}`;
+                
+                outputSection.style.display = 'block';
+                log("Berhasil!");
+
+            } catch (error) {
+                log("Error: " + error.message);
+                alert("Terjadi kesalahan. Mungkin video terlalu besar untuk memori browser HP Anda.");
+            } finally {
+                convertBtn.disabled = false;
+                convertBtn.innerText = "⚡ Reverse & Export (Asli)";
+            }
+        });
+    </script>
+</body>
+</html>
